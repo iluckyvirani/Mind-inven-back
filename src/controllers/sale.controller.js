@@ -814,7 +814,7 @@ const exportSalesPdf = async (req, res, next) => {
 
     // ── Header ──
     doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e293b');
-    doc.text('Dimag Chemist & Surgicals', { align: 'center' });
+    doc.text('Deemag 2000', { align: 'center' });
 
     doc.moveDown(0.2);
     doc.fontSize(9).font('Helvetica').fillColor('#475569');
