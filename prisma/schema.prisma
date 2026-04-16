@@ -1,0 +1,299 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER (Auth + Team)
+// ============================================
+model User {
+  id        String    @id @default(cuid())
+  name      String
+  email     String    @unique
+  phone     String?
+  password  String
+  role      Role      @default(PHARMACIST)
+  status    Status    @default(ACTIVE)
+  lastLogin DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  sales Sale[] @relation("SaleCreatedBy")
+
+  @@map("users")
+}
+
+enum Role {
+  ADMIN
+  PHARMACIST
+  CASHIER
+}
+
+enum Status {
+  ACTIVE
+  INACTIVE
+}
+
+// ============================================
+// CUSTOMER
+// Auto-created during sale, phone is unique key
+// ============================================
+model Customer {
+  id               String    @id @default(cuid())
+  name             String
+  age              Int
+  address          String
+  phone            String    @unique
+  email            String?
+  bankName         String?
+  accountNo        String?
+  gstNo            String?
+  lastPurchaseDate DateTime?
+  totalPurchases   Int       @default(0)
+  totalSpent       Float     @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  sales Sale[]
+
+  @@map("customers")
+}
+
+// ============================================
+// MEDICINE CATEGORY
+// ============================================
+model Category {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  createdAt DateTime   @default(now())
+
+  medicines Medicine[]
+
+  @@map("categories")
+}
+
+// ============================================
+// MEDICINE
+// ============================================
+model Medicine {
+  id               String         @id @default(cuid())
+  medicineCode     String?        @unique
+  name             String
+  genericName      String?
+  form             String?
+  categoryId       String
+  category         Category       @relation(fields: [categoryId], references: [id])
+  batchNo          String
+  barcode          String?
+  supplierId       String?
+  supplier         Supplier?      @relation(fields: [supplierId], references: [id])
+  stock            Int            @default(0)
+  minStock         Int            @default(10)
+  unitPrice        Float
+  sellingPrice     Float
+  mrp              Float?
+  expiryDate       DateTime
+  manufacturer     String?
+  description      String?
+  hsnCode          String?
+  gstPercent       Float?         @default(0)
+  rackNo           String?
+  status           MedicineStatus @default(IN_STOCK)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  saleItems SaleItem[]
+  stockLogs StockLog[]
+
+  @@map("medicines")
+}
+
+enum MedicineStatus {
+  IN_STOCK
+  LOW_STOCK
+  OUT_OF_STOCK
+}
+
+// ============================================
+// STOCK LOG — tracks every stock add/deduct
+// ============================================
+model StockLog {
+  id         String       @id @default(cuid())
+  medicineId String
+  medicine   Medicine     @relation(fields: [medicineId], references: [id])
+  type       StockLogType
+  quantity   Int
+  batchNo    String?
+  note       String?
+  createdAt  DateTime     @default(now())
+
+  @@map("stock_logs")
+}
+
+enum StockLogType {
+  ADD
+  DEDUCT
+  ADJUSTMENT
+}
+
+// ============================================
+// SUPPLIER
+// ============================================
+model Supplier {
+  id               String    @id @default(cuid())
+  supplierCode     String?   @unique
+  name             String
+  contactPerson    String?
+  phone            String
+  email            String?
+  address          String?
+  bankName         String?
+  accountNo        String?
+  ifscCode         String?
+  gstNo            String?
+  panNo            String?
+  status           Status    @default(ACTIVE)
+  totalPurchase    Float     @default(0)
+  totalPaid        Float     @default(0)
+  lastPurchaseDate DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  medicines Medicine[]
+  payments  SupplierPayment[]
+
+  @@map("suppliers")
+}
+
+// ============================================
+// SUPPLIER PAYMENT
+// ============================================
+model SupplierPayment {
+  id          String      @id @default(cuid())
+  supplierId  String
+  supplier    Supplier    @relation(fields: [supplierId], references: [id])
+  amount      Float
+  paymentMode PaymentMode
+  note        String?
+  date        DateTime    @default(now())
+  createdAt   DateTime    @default(now())
+
+  @@map("supplier_payments")
+}
+
+// ============================================
+// SALE (Invoice / Bill)
+// ============================================
+model Sale {
+  id            String        @id @default(cuid())
+  invoiceNo     String        @unique
+  customerId    String
+  customer      Customer      @relation(fields: [customerId], references: [id])
+  createdById   String
+  createdBy     User          @relation("SaleCreatedBy", fields: [createdById], references: [id])
+  prescribedby  String?
+  subtotal      Float
+  discount      Float         @default(0)
+  tax           Float         @default(0)
+  grandTotal    Float
+  amountPaid    Float
+  balance       Float         @default(0)
+  paymentMode   PaymentMode
+  paymentStatus PaymentStatus @default(PENDING)
+  notes         String?
+  date          DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  items SaleItem[]
+
+  @@map("sales")
+}
+
+enum PaymentMode {
+  CASH
+  CARD
+  UPI
+}
+
+enum PaymentStatus {
+  PAID
+  PENDING
+  PARTIAL
+}
+
+// ============================================
+// SALE ITEM (medicines in a single sale)
+// ============================================
+model SaleItem {
+  id         String   @id @default(cuid())
+  saleId     String
+  sale       Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  medicineId String
+  medicine   Medicine @relation(fields: [medicineId], references: [id])
+  quantity   Int
+  unitPrice  Float
+  discount   Float    @default(0)
+  amount     Float
+  createdAt  DateTime @default(now())
+
+  @@map("sale_items")
+}
+
+// ============================================
+// EXPENSE
+// ============================================
+model Expense {
+  id              String           @id @default(cuid())
+  title           String
+  amount          Float
+  category        String
+  date            DateTime
+  paymentMode     PaymentMode
+  isRecurring     Boolean          @default(false)
+  recurringPeriod RecurringPeriod?
+  note            String?
+  receiptUrl      String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@map("expenses")
+}
+
+enum RecurringPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+// ============================================
+// SHOP SETTINGS (single row — one shop)
+// ============================================
+model ShopSettings {
+  id          String   @id @default(cuid())
+  name        String   @default("Dimag Pharmacy")
+  tagline     String?
+  address     String?
+  city        String?
+  state       String?
+  pincode     String?
+  phone       String?
+  mobile      String?
+  email       String?
+  website     String?
+  gstin       String?
+  licenseNo   String?
+  printHeader String?
+  printFooter String?
+  logoUrl     String?
+  taxRate     Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("shop_settings")
+}
