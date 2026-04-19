@@ -7,6 +7,7 @@ const {
   updateSupplierValidator,
   supplierPaymentValidator,
 } = require('../validators/supplier.validator');
+const { supplierReturnValidator } = require('../validators/supplierReturn.validator');
 const {
   getSuppliers,
   getSupplierById,
@@ -16,6 +17,10 @@ const {
   addPayment,
   getPayments,
 } = require('../controllers/supplier.controller');
+const {
+  createSupplierReturn,
+  getSupplierReturns,
+} = require('../controllers/supplierReturn.controller');
 
 // All routes require authentication
 router.use(auth);
@@ -56,5 +61,16 @@ router.post(
 );
 
 router.get('/:id/payments', getPayments);
+
+// Supplier returns
+router.post(
+  '/:id/return',
+  authorize('ADMIN', 'PHARMACIST'),
+  supplierReturnValidator,
+  validate,
+  createSupplierReturn
+);
+
+router.get('/:id/returns', getSupplierReturns);
 
 module.exports = router;

@@ -7,6 +7,7 @@ const {
   updatePaymentValidator,
   updateSaleValidator,
 } = require('../validators/sale.validator');
+const { saleReturnValidator } = require('../validators/saleReturn.validator');
 const {
   createSale,
   getSales,
@@ -19,6 +20,11 @@ const {
   getSalesByPhone,
   exportSalesPdf,
 } = require('../controllers/sale.controller');
+const {
+  createSaleReturn,
+  getSaleReturns,
+  getAllSaleReturns,
+} = require('../controllers/saleReturn.controller');
 
 // All routes require authentication
 router.use(auth);
@@ -27,6 +33,7 @@ router.use(auth);
 router.get('/export/pdf', exportSalesPdf);
 router.get('/summary/:date', getDailySummary);
 router.get('/by-phone/:phone', getSalesByPhone);
+router.get('/returns', getAllSaleReturns);
 
 // Sale CRUD
 router.get('/', getSales);
@@ -41,6 +48,15 @@ router.post(
 
 router.get('/:id', getSaleById);
 router.get('/:id/receipt', getReceipt);
+router.get('/:id/returns', getSaleReturns);
+
+router.post(
+  '/:id/return',
+  authorize('ADMIN', 'PHARMACIST'),
+  saleReturnValidator,
+  validate,
+  createSaleReturn
+);
 
 router.patch(
   '/:id/payment',

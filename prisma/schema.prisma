@@ -58,7 +58,8 @@ model Customer {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  sales Sale[]
+  sales       Sale[]
+  saleReturns  SaleReturn[]
 
   @@map("customers")
 }
@@ -106,8 +107,10 @@ model Medicine {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
-  saleItems SaleItem[]
-  stockLogs StockLog[]
+  saleItems          SaleItem[]
+  stockLogs           StockLog[]
+  saleReturnItems     SaleReturnItem[]
+  supplierReturnItems SupplierReturnItem[]
 
   @@map("medicines")
 }
@@ -138,6 +141,8 @@ enum StockLogType {
   ADD
   DEDUCT
   ADJUSTMENT
+  SALE_RETURN
+  SUPPLIER_RETURN
 }
 
 // ============================================
@@ -163,8 +168,9 @@ model Supplier {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  medicines Medicine[]
-  payments  SupplierPayment[]
+  medicines       Medicine[]
+  payments         SupplierPayment[]
+  supplierReturns  SupplierReturn[]
 
   @@map("suppliers")
 }
@@ -209,7 +215,8 @@ model Sale {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  items SaleItem[]
+  items       SaleItem[]
+  saleReturns  SaleReturn[]
 
   @@map("sales")
 }
@@ -296,4 +303,72 @@ model ShopSettings {
   updatedAt   DateTime @updatedAt
 
   @@map("shop_settings")
+}
+
+// ============================================
+// SALE RETURN (Customer returns medicine)
+// ============================================
+model SaleReturn {
+  id          String           @id @default(cuid())
+  returnNo    String           @unique
+  saleId      String
+  sale        Sale             @relation(fields: [saleId], references: [id])
+  customerId  String
+  customer    Customer         @relation(fields: [customerId], references: [id])
+  totalAmount Float
+  reason      String?
+  date        DateTime         @default(now())
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  items SaleReturnItem[]
+
+  @@map("sale_returns")
+}
+
+model SaleReturnItem {
+  id           String     @id @default(cuid())
+  saleReturnId String
+  saleReturn   SaleReturn @relation(fields: [saleReturnId], references: [id], onDelete: Cascade)
+  medicineId   String
+  medicine     Medicine   @relation(fields: [medicineId], references: [id])
+  quantity     Int
+  unitPrice    Float
+  amount       Float
+  createdAt    DateTime   @default(now())
+
+  @@map("sale_return_items")
+}
+
+// ============================================
+// SUPPLIER RETURN (Return medicine to supplier)
+// ============================================
+model SupplierReturn {
+  id          String              @id @default(cuid())
+  returnNo    String              @unique
+  supplierId  String
+  supplier    Supplier            @relation(fields: [supplierId], references: [id])
+  totalAmount Float
+  reason      String?
+  date        DateTime            @default(now())
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  items SupplierReturnItem[]
+
+  @@map("supplier_returns")
+}
+
+model SupplierReturnItem {
+  id               String         @id @default(cuid())
+  supplierReturnId String
+  supplierReturn   SupplierReturn @relation(fields: [supplierReturnId], references: [id], onDelete: Cascade)
+  medicineId       String
+  medicine         Medicine       @relation(fields: [medicineId], references: [id])
+  quantity         Int
+  unitPrice        Float
+  amount           Float
+  createdAt        DateTime       @default(now())
+
+  @@map("supplier_return_items")
 }
