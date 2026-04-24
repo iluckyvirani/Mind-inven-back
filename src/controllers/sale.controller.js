@@ -51,19 +51,26 @@ const createSale = async (req, res, next) => {
       }
     }
 
-    // 2. Calculate totals
+    // 2. Calculate totals (including per-item GST)
     let subtotal = 0;
     let totalDiscount = 0;
+    let totalTax = 0;
     const saleItems = items.map((item) => {
+      const med = medicineMap[item.medicineId];
       const qty = parseInt(item.quantity);
       const price = parseFloat(item.unitPrice);
       const discountPct = parseFloat(item.discount) || 0;
+      // Use gstPercent from request payload, fallback to medicine record
+      const gstPct = parseFloat(item.gstPercent) || med.gstPercent || 0;
       const lineTotal = qty * price;
       const discountAmount = (lineTotal * discountPct) / 100;
-      const amount = lineTotal - discountAmount;
+      const afterDiscount = lineTotal - discountAmount;
+      const gstAmount = afterDiscount * gstPct / 100;
+      const amount = afterDiscount + gstAmount;
 
       subtotal += lineTotal;
       totalDiscount += discountAmount;
+      totalTax += gstAmount;
 
       return {
         medicineId: item.medicineId,
@@ -74,7 +81,7 @@ const createSale = async (req, res, next) => {
       };
     });
 
-    const grandTotal = subtotal - totalDiscount;
+    const grandTotal = subtotal - totalDiscount + totalTax;
     const balance = Math.max(0, grandTotal - paidAmount);
     let paymentStatus = 'PENDING';
     if (paidAmount >= grandTotal) paymentStatus = 'PAID';
@@ -111,7 +118,7 @@ const createSale = async (req, res, next) => {
           createdById: req.user.id,
           subtotal,
           discount: totalDiscount,
-          tax: 0,
+          tax: totalTax,
           grandTotal,
           amountPaid: paidAmount,
           balance,
@@ -665,19 +672,34 @@ const deleteSale = async (req, res, next) => {
   try {
     const sale = await prisma.sale.findUnique({
       where: { id: req.params.id },
-      include: { items: true },
+      include: {
+        items: true,
+        saleReturns: { include: { items: true } },
+      },
     });
 
     if (!sale) {
       return error(res, 'Sale not found.', 404);
     }
 
+    // Build a map of already-returned quantities per medicine (stock was already restored on return)
+    const returnedQtyMap = {};
+    for (const ret of sale.saleReturns) {
+      for (const ri of ret.items) {
+        returnedQtyMap[ri.medicineId] = (returnedQtyMap[ri.medicineId] || 0) + ri.quantity;
+      }
+    }
+
     await prisma.$transaction(async (tx) => {
-      // a. Restore stock for each sold item
+      // a. Restore net stock for each sold item (exclude quantities already returned)
       for (const item of sale.items) {
+        const alreadyReturned = returnedQtyMap[item.medicineId] || 0;
+        const netRestore = item.quantity - alreadyReturned;
+        if (netRestore <= 0) continue;
+
         const med = await tx.medicine.findUnique({ where: { id: item.medicineId } });
         if (med) {
-          const restoredStock = med.stock + item.quantity;
+          const restoredStock = med.stock + netRestore;
           await tx.medicine.update({
             where: { id: item.medicineId },
             data: {
@@ -690,7 +712,7 @@ const deleteSale = async (req, res, next) => {
             data: {
               medicineId: item.medicineId,
               type: 'ADJUSTMENT',
-              quantity: item.quantity,
+              quantity: netRestore,
               batchNo: med.batchNo,
               note: `Sale deleted — Invoice: ${sale.invoiceNo}, stock restored`,
             },
@@ -707,7 +729,14 @@ const deleteSale = async (req, res, next) => {
         },
       });
 
-      // c. Delete sale (cascade deletes SaleItems via Prisma schema)
+      // c. Delete linked sale returns first (SaleReturnItems cascade via schema)
+      if (sale.saleReturns.length > 0) {
+        await tx.saleReturn.deleteMany({
+          where: { saleId: sale.id },
+        });
+      }
+
+      // d. Delete sale (cascade deletes SaleItems via Prisma schema)
       await tx.sale.delete({ where: { id: sale.id } });
     }, { timeout: 15000 });
 

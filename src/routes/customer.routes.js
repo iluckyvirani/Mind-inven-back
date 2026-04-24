@@ -10,6 +10,7 @@ const {
   updateCustomer,
   deleteCustomer,
   getPurchaseHistory,
+  collectPayment,
 } = require('../controllers/customer.controller');
 
 // All routes require authentication
@@ -27,6 +28,7 @@ router.post(
 
 router.get('/:id', getCustomerById);
 router.get('/:id/purchases', getPurchaseHistory);
+router.post('/:id/payment', auth, collectPayment);
 
 router.put(
   '/:id',

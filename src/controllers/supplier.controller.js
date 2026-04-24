@@ -64,7 +64,10 @@ const getSupplierById = async (req, res, next) => {
             batchNo: true,
             stock: true,
             status: true,
+            unitPrice: true,
             sellingPrice: true,
+            gstPercent: true,
+            createdAt: true,
           },
           orderBy: { name: 'asc' },
         },
@@ -184,27 +187,40 @@ const deleteSupplier = async (req, res, next) => {
   try {
     const existing = await prisma.supplier.findUnique({
       where: { id: req.params.id },
-      include: {
-        medicines: { take: 1 },
-        payments: { take: 1 },
-      },
     });
 
     if (!existing) {
       return error(res, 'Supplier not found.', 404);
     }
 
-    if (existing.medicines.length > 0) {
-      return error(res, 'Cannot delete supplier linked to medicines. Remove medicine associations first.', 400);
-    }
+    const supplierId = req.params.id;
 
-    if (existing.payments.length > 0) {
-      return error(res, 'Cannot delete supplier with payment records.', 400);
-    }
+    await prisma.$transaction(async (tx) => {
+      // 1. Nullify medicine supplier association
+      await tx.medicine.updateMany({
+        where: { supplierId },
+        data: { supplierId: null },
+      });
 
-    await prisma.supplier.delete({ where: { id: req.params.id } });
+      // 2. Delete supplier return items, then supplier returns
+      const returns = await tx.supplierReturn.findMany({
+        where: { supplierId },
+        select: { id: true },
+      });
+      if (returns.length > 0) {
+        const returnIds = returns.map(r => r.id);
+        await tx.supplierReturnItem.deleteMany({ where: { supplierReturnId: { in: returnIds } } });
+        await tx.supplierReturn.deleteMany({ where: { supplierId } });
+      }
 
-    return success(res, 'Supplier deleted successfully');
+      // 3. Delete supplier payments
+      await tx.supplierPayment.deleteMany({ where: { supplierId } });
+
+      // 4. Delete supplier
+      await tx.supplier.delete({ where: { id: supplierId } });
+    });
+
+    return success(res, 'Supplier and all related records deleted successfully');
   } catch (err) {
     next(err);
   }

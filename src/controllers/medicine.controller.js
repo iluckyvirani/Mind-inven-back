@@ -163,9 +163,11 @@ const addMedicine = async (req, res, next) => {
       });
     }
 
-    // Update supplier totalPurchase and lastPurchaseDate
+    // Update supplier totalPurchase and lastPurchaseDate (include GST)
     if (supplierId && stockVal > 0) {
-      const purchaseAmount = stockVal * parseFloat(unitPrice);
+      const gst = gstPercent !== undefined ? parseFloat(gstPercent) : 0;
+      const subtotal = stockVal * parseFloat(unitPrice);
+      const purchaseAmount = subtotal * (1 + gst / 100);
       await prisma.supplier.update({
         where: { id: supplierId },
         data: {
@@ -242,22 +244,32 @@ const deleteMedicine = async (req, res, next) => {
   try {
     const existing = await prisma.medicine.findUnique({
       where: { id: req.params.id },
-      include: { saleItems: { take: 1 } },
     });
 
     if (!existing) {
       return error(res, 'Medicine not found.', 404);
     }
 
-    if (existing.saleItems.length > 0) {
-      return error(res, 'Cannot delete medicine that has been sold. It is linked to sale records.', 400);
-    }
+    const medicineId = req.params.id;
 
-    // Delete stock logs first, then medicine
-    await prisma.stockLog.deleteMany({ where: { medicineId: req.params.id } });
-    await prisma.medicine.delete({ where: { id: req.params.id } });
+    await prisma.$transaction(async (tx) => {
+      // 1. Delete supplier return items referencing this medicine
+      await tx.supplierReturnItem.deleteMany({ where: { medicineId } });
 
-    return success(res, 'Medicine deleted successfully');
+      // 2. Delete sale return items referencing this medicine
+      await tx.saleReturnItem.deleteMany({ where: { medicineId } });
+
+      // 3. Delete sale items referencing this medicine
+      await tx.saleItem.deleteMany({ where: { medicineId } });
+
+      // 4. Delete stock logs
+      await tx.stockLog.deleteMany({ where: { medicineId } });
+
+      // 5. Delete the medicine itself
+      await tx.medicine.delete({ where: { id: medicineId } });
+    });
+
+    return success(res, 'Medicine and all related records deleted successfully');
   } catch (err) {
     next(err);
   }
@@ -306,9 +318,10 @@ const addStock = async (req, res, next) => {
       }),
     ]);
 
-    // Update supplier totalPurchase and lastPurchaseDate
+    // Update supplier totalPurchase and lastPurchaseDate (include GST)
     if (medicine.supplierId && qty > 0) {
-      const purchaseAmount = qty * medicine.unitPrice;
+      const subtotal = qty * medicine.unitPrice;
+      const purchaseAmount = subtotal * (1 + (medicine.gstPercent || 0) / 100);
       await prisma.supplier.update({
         where: { id: medicine.supplierId },
         data: {

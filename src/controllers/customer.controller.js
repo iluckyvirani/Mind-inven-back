@@ -74,7 +74,22 @@ const getCustomers = async (req, res, next) => {
       prisma.customer.count({ where }),
     ]);
 
-    return success(res, 'Customers fetched successfully', customers, 200, getPaginationMeta(total, page, limit));
+    // Compute live pendingAmount from actual sale balances
+    const customerIds = customers.map(c => c.id);
+    const pendingAgg = await prisma.sale.groupBy({
+      by: ['customerId'],
+      _sum: { balance: true },
+      where: { customerId: { in: customerIds } },
+    });
+    const pendingMap = {};
+    pendingAgg.forEach(a => { pendingMap[a.customerId] = a._sum.balance || 0; });
+
+    const result = customers.map(c => ({
+      ...c,
+      pendingAmount: pendingMap[c.id] || 0,
+    }));
+
+    return success(res, 'Customers fetched successfully', result, 200, getPaginationMeta(total, page, limit));
   } catch (err) {
     next(err);
   }
@@ -246,6 +261,60 @@ const getPurchaseHistory = async (req, res, next) => {
   }
 };
 
+/**
+ * POST /api/customers/:id/payment
+ * Collect payment from customer — distributes across oldest unpaid sales first
+ */
+const collectPayment = async (req, res, next) => {
+  try {
+    const { amount, paymentMode } = req.body;
+    let remaining = parseFloat(amount);
+
+    if (isNaN(remaining) || remaining <= 0) {
+      return error(res, 'Invalid payment amount.', 400);
+    }
+
+    const pendingSales = await prisma.sale.findMany({
+      where: {
+        customerId: req.params.id,
+        balance: { gt: 0 },
+      },
+      orderBy: { date: 'asc' },
+    });
+
+    if (pendingSales.length === 0) {
+      return error(res, 'No pending balance for this customer.', 400);
+    }
+
+    const updates = [];
+    for (const sale of pendingSales) {
+      if (remaining <= 0) break;
+      const paying = Math.min(remaining, sale.balance);
+      const newPaid = sale.amountPaid + paying;
+      const newBalance = Math.max(0, sale.grandTotal - newPaid);
+      const newStatus = newBalance === 0 ? 'PAID' : 'PARTIAL';
+      updates.push(
+        prisma.sale.update({
+          where: { id: sale.id },
+          data: {
+            amountPaid: newPaid,
+            balance: newBalance,
+            paymentStatus: newStatus,
+            ...(paymentMode ? { paymentMode: paymentMode.toUpperCase() } : {}),
+          },
+        })
+      );
+      remaining -= paying;
+    }
+
+    await prisma.$transaction(updates);
+
+    return success(res, 'Payment collected successfully.');
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   addCustomer,
   getCustomers,
@@ -253,4 +322,5 @@ module.exports = {
   updateCustomer,
   deleteCustomer,
   getPurchaseHistory,
+  collectPayment,
 };
